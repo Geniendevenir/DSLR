@@ -206,6 +206,8 @@ def data_analysis():
 	#print(numerical_features.describe())
 
 
+def main():
+	data_analysis()
 
 if __name__ == "__main__":
-	data_analysis()
+	main()
