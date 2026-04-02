@@ -17,20 +17,28 @@ class Preprocessor:
 		self.features_to_drop = features_to_drop
 
 	def clean(self, df: pd.DataFrame):
-		# 1. Keep only numerical features
 
-		# 1. Keep only selected features (see pair plot)
-		df = df.drop(columns=features_to_drop)
+		# 1. Save the labels
+		labels = df['Hogwarts House']
 
-		# 2. Imptation: Replace NaN values by the mean of the 
+		# 2. Keep only numerical features
+		df_num = df.select_dtypes(include=["number"])
+
+		# 3. Keep only selected features (see pair plot)
+		df_select = df_num.drop(columns=features_to_drop)
+
+		# 4. Concatenate back the numerical features with the labels
+		df_cleaned = pd.concat([df_select, labels], axis=1)
+
+		return df_cleaned
 
 	# Calculate the mean of training features
 	def fit(self, train: pd.DataFrame):
-		return
+		self.train_mean = train.select_dtypes(include=["number"]).mean()
 
-	# Apply the mean for the given set (test or validation)
+	# Apply the mean for the given set (train, test or validation)
 	def transform(self, df: pd.DataFrame):
-		return
+		df = df.fillna(self.train_mean)
 
 class DataLoader:
 	def __init__(self, df: pd.DataFrame, batch_size: int, shuffle: bool):
@@ -38,7 +46,8 @@ class DataLoader:
 		self.batch_size = batch_size
 		self.shuffle = shuffle
 
-	def load(self, path: str) -> pd.DataFrame:
+	@staticmethod
+	def load(path: str) -> pd.DataFrame:
 		raw_df = pd.read_csv(path)	
 
 		return raw_df
@@ -52,7 +61,7 @@ def split_dataset(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15, test_ratio=
 	Returns: A tuple with the three sets as pd.Dataframe
 	"""
 
-	if sum(train_ratio, test_ratio, val_ratio) != 1:
+	if sum([train_ratio, test_ratio, val_ratio]) != 1:
 		raise ValueError("Splitting Ratio don't add up to one")
 
 	# Shuffle dataset using the seed for reproductibility
@@ -61,12 +70,11 @@ def split_dataset(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15, test_ratio=
 	# Calculate split indices
 	train_end = int(len(df_shuffled) * train_ratio)
 	val_end = train_end + int(len(df_shuffled) * val_ratio)
-	test_start = train_end + val_end
 
 	# Slice sets
-	df_train = df.iloc[:train_end]	
-	df_val = df.iloc[train_end:val_end]	
-	df_test = df.iloc[test_start:]	
+	df_train = df_shuffled.iloc[:train_end]	
+	df_val = df_shuffled.iloc[train_end:val_end]	
+	df_test = df_shuffled.iloc[val_end:]	
 
 	return (df_train, df_val, df_test)
 
@@ -83,9 +91,28 @@ def main():
 		raise ValueError("You should use the 'dataset_train.csv' to train the model")
 	
 
+	print("STEP 1: Loading Data")
 	raw_data = DataLoader.load(data_path)
-	print("STEP 1: Data has been loaded succesfully")
 
+	print("STEP 2: Clean Data (Keep numerical features and labels")
+	preprocessor = Preprocessor(features_to_drop)
+	cleaned_data = preprocessor.clean(raw_data)
+
+	print("STEP 3: Splitting Dataset (X_train, X_val, Y)")
+	train_set, val_set, test_set = split_dataset(cleaned_data)
+
+	print("STEP 4: Calculate the mean of X_train features")
+	preprocessor.fit(train_set)
+
+	print("STEP 5: Fill NaN Values of all sets by X_train mean")
+	preprocessor.transform(train_set)
+	preprocessor.transform(val_set)
+	preprocessor.transform(test_set)
+
+
+	print(test_set.describe())
+	print(val_set.describe())
+	print(test_set.describe())
 
 if __name__ == "__main__":
 	main()
