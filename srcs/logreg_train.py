@@ -12,20 +12,30 @@ features_to_drop = [
 	"Care of Magical Creatures"
 ]
 
+house_map = {
+	'Gryffindor': 0,
+    'Slytherin': 1,
+    'Ravenclaw': 2,
+    'Hufflepuff': 3
+}
+
 class Preprocessor:
 	def __init__(self, features_to_drop: Sequence[str]):
 		self.features_to_drop = features_to_drop
 
 	def clean(self, df: pd.DataFrame):
 
+		# 0. Drop Examples that dont have labels
+		df_labeled = df.dropna(subset=['Hogwarts House'])
+
 		# 1. Save the labels
-		labels = df['Hogwarts House']
+		labels = df_labeled['Hogwarts House']
 
 		# 2. Keep only numerical features
-		df_num = df.select_dtypes(include=["number"])
+		df_num = df_labeled.select_dtypes(include=["number"])
 
 		# 3. Keep only selected features (see pair plot)
-		df_select = df_num.drop(columns=features_to_drop)
+		df_select = df_num.drop(columns=features_to_drop, errors='ignore')
 
 		# 4. Concatenate back the numerical features with the labels
 		df_cleaned = pd.concat([df_select, labels], axis=1)
@@ -36,21 +46,18 @@ class Preprocessor:
 	def fit(self, train: pd.DataFrame):
 		self.train_mean = train.select_dtypes(include=["number"]).mean()
 
-	# Apply the mean for the given set (train, test or validation)
+	# Encode sets: Apply the mean for the given set (train, test or validation)
 	def transform(self, df: pd.DataFrame):
-		df = df.fillna(self.train_mean)
+		df_out = df.copy()
+		df_out['Hogwarts House'] = df_out['Hogwarts House'].replace(house_map)
+		df_out = df_out.fillna(self.train_mean)
+		return df_out
 
 class DataLoader:
 	def __init__(self, df: pd.DataFrame, batch_size: int, shuffle: bool):
 		self.df = df
 		self.batch_size = batch_size
 		self.shuffle = shuffle
-
-	@staticmethod
-	def load(path: str) -> pd.DataFrame:
-		raw_df = pd.read_csv(path)	
-
-		return raw_df
 
 	def normalization(self):
 		return
@@ -61,7 +68,7 @@ def split_dataset(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15, test_ratio=
 	Returns: A tuple with the three sets as pd.Dataframe
 	"""
 
-	if sum([train_ratio, test_ratio, val_ratio]) != 1:
+	if not np.isclose(sum([train_ratio, test_ratio, val_ratio]), 1.0):
 		raise ValueError("Splitting Ratio don't add up to one")
 
 	# Shuffle dataset using the seed for reproductibility
@@ -76,10 +83,20 @@ def split_dataset(df: pd.DataFrame, train_ratio=0.7, val_ratio=0.15, test_ratio=
 	df_val = df_shuffled.iloc[train_end:val_end]	
 	df_test = df_shuffled.iloc[val_end:]	
 
-	return (df_train, df_val, df_test)
+	# Verify Splitting is correct
+	set_train = set(df_train['Index'])
+	set_val = set(df_val['Index'])
+	set_test = set(df_test['Index'])
 
+	print(f"Are all sets disjoint ?: {are_all_disjoint((set_train, set_val, set_test))}")
+
+	return (df_train.drop('Index', axis=1), df_val.drop('Index', axis=1), df_test.drop('Index', axis=1))
+
+def are_all_disjoint(list_of_sets: list[set]) -> bool:
+	total_elements = sum(len(s) for s in list_of_sets)
+	combined_elements = len(set.union(*list_of_sets))
+	return total_elements == combined_elements
 	
-
 
 def main():
 	if len(sys.argv) != 2:
@@ -92,27 +109,24 @@ def main():
 	
 
 	print("STEP 1: Loading Data")
-	raw_data = DataLoader.load(data_path)
+	raw_data = pd.read_csv(data_path)
 
 	print("STEP 2: Clean Data (Keep numerical features and labels")
 	preprocessor = Preprocessor(features_to_drop)
 	cleaned_data = preprocessor.clean(raw_data)
 
-	print("STEP 3: Splitting Dataset (X_train, X_val, Y)")
+	print("STEP 3: Splitting Dataset (Train/Validation/Test)")
 	train_set, val_set, test_set = split_dataset(cleaned_data)
 
 	print("STEP 4: Calculate the mean of X_train features")
 	preprocessor.fit(train_set)
 
 	print("STEP 5: Fill NaN Values of all sets by X_train mean")
-	preprocessor.transform(train_set)
-	preprocessor.transform(val_set)
-	preprocessor.transform(test_set)
+	print("\tAnd encode the label values")
+	train_set = preprocessor.transform(train_set)
+	val_set = preprocessor.transform(val_set)
+	test_set = preprocessor.transform(test_set)
 
-
-	print(test_set.describe())
-	print(val_set.describe())
-	print(test_set.describe())
 
 if __name__ == "__main__":
 	main()
